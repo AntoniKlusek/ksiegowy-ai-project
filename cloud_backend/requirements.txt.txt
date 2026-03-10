@@ -1,0 +1,17 @@
+# --- Chmura i API ---
+modal==0.62.65
+fastapi[standard]
+python-multipart
+
+# --- Modele i Machine Learning (Hugging Face) ---
+torch
+torchvision
+transformers>=4.46.0
+accelerate
+peft
+qwen-vl-utils
+huggingface-hub
+
+# --- Przetwarzanie Obrazu i Narzędzia GUI ---
+pillow
+opencv-python
