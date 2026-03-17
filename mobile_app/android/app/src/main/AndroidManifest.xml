@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="ksiegowy_app"
+        android:label="Na co to poszło?!"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

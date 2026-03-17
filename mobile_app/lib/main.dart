@@ -19,15 +19,13 @@ class KsiegowyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Księgowy AI',
-      debugShowCheckedModeBanner: false, // Usuwamy irytujący pasek "DEBUG"
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // Nasz główny, jasnoniebieski motyw
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF0047AB),
           primary: const Color(0xFF0047AB),
           secondary: const Color(0xFF0047AB),
         ),
-        // Bardzo jasne tło, żeby kafelki paragonów ładnie się odcinały
         scaffoldBackgroundColor: const Color(0xFFF5F9FF),
         useMaterial3: true,
       ),
@@ -46,7 +44,6 @@ class EkranGlowny extends StatefulWidget {
 class _EkranGlownyState extends State<EkranGlowny> {
   int _obecnyIndeks = 0;
 
-  // Tutaj trzymamy nasze 3 ekrany
   static final List<Widget> _ekrany = <Widget>[
     const EkranSkanera(),
     const EkranParagonow(),
@@ -74,11 +71,10 @@ class _EkranGlownyState extends State<EkranGlowny> {
       ),
       body: Center(child: _ekrany.elementAt(_obecnyIndeks)),
       bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType
-            .fixed, // <--- To zmusza pasek do posłuszeństwa
-        backgroundColor: Colors.white, // <--- Białe tło paska
-        selectedItemColor: const Color(0xFF0047AB), // Nasz kobalt
-        unselectedItemColor: Colors.grey, // <--- Szare nieaktywne ikony
+        type: BottomNavigationBarType.fixed,
+        backgroundColor: Colors.white,
+        selectedItemColor: const Color(0xFF0047AB),
+        unselectedItemColor: Colors.grey,
         showUnselectedLabels: true,
         items: const <BottomNavigationBarItem>[
           BottomNavigationBarItem(
@@ -116,12 +112,12 @@ class _EkranSkaneraState extends State<EkranSkanera> {
   bool _trwaLadowanie = false;
   int _aktualnyParagon = 0;
   int _wszystkieParagony = 0;
-  String _wybranyModel = 'Qwen';
 
   final ImagePicker _picker = ImagePicker();
 
-  // TODO: Podmień na swój własny adres z wdrożenia Modal
-  final String baseUrl = "https://TWOJ-ADRES-Z-MODAL.modal.run";
+  // ⚠️ Twój nowy, zunifikowany endpoint Multi-LoRA (bez "-dev")
+  final String apiEndpoint = "https://TWOJ-ADRES-Z-MODAL.modal.run";
+
   final Color kobalt = const Color(0xFF0047AB);
 
   void _pokazMenuWyboru() {
@@ -165,15 +161,11 @@ class _EkranSkaneraState extends State<EkranSkanera> {
     );
   }
 
-  // Akcja: Aparat (zawsze 1 zdjęcie)
   Future<void> _zrobZdjecieZAParatu() async {
     try {
-      // Odpalamy natywny skaner (true = pozwala na edycję rogów)
       List<String>? sciezkiZdjec = await CunningDocumentScanner.getPictures();
 
       if (sciezkiZdjec != null && sciezkiZdjec.isNotEmpty) {
-        // Magia: Konwertujemy tekstowe ścieżki naiekty XFile,
-        // żeby Twój system kolejkowania nawet nie zauważył różnicy!
         List<XFile> plikiDoKolejki = sciezkiZdjec
             .map((sciezka) => XFile(sciezka))
             .toList();
@@ -185,47 +177,24 @@ class _EkranSkaneraState extends State<EkranSkanera> {
     }
   }
 
-  // Akcja: Galeria (multi-select)
+  // Akcja: Galeria / Pliki (multi-select)
   Future<void> _wybierzZGalerii() async {
     try {
+      // Otwiera natywny wybierak zdjęć (Galeria / Pliki)
       final List<XFile> wybraneZdjecia = await _picker.pickMultiImage(
         imageQuality: 80,
       );
 
       if (wybraneZdjecia.isNotEmpty) {
-        List<XFile> przycieteZdjecia = [];
-
-        // Pętla przechodząca przez wybrane zdjęcia i pozwalająca na ich docięcie
-        for (var zdjecie in wybraneZdjecia) {
-          CroppedFile? przycietyPlik = await ImageCropper().cropImage(
-            sourcePath: zdjecie.path,
-            uiSettings: [
-              AndroidUiSettings(
-                toolbarTitle: 'Przytnij Paragon',
-                toolbarColor: kobalt,
-                toolbarWidgetColor: Colors.white,
-                initAspectRatio: CropAspectRatioPreset.original,
-                lockAspectRatio: false,
-              ),
-              IOSUiSettings(title: 'Przytnij Paragon'),
-            ],
-          );
-
-          if (przycietyPlik != null) {
-            przycieteZdjecia.add(XFile(przycietyPlik.path));
-          }
-        }
-
-        if (przycieteZdjecia.isNotEmpty) {
-          _przetworzKolejke(przycieteZdjecia);
-        }
+        // Zrezygnowaliśmy z ImageCroppera!
+        // Od razu pakujemy wybrane pliki do naszej kolejki wysyłkowej.
+        _przetworzKolejke(wybraneZdjecia);
       }
     } catch (e) {
       _pokazKomunikat('Błąd galerii: $e', isError: true);
     }
   }
 
-  // Silnik Kolejkowania
   Future<void> _przetworzKolejke(List<XFile> pliki) async {
     setState(() {
       _wszystkieParagony = pliki.length;
@@ -236,7 +205,6 @@ class _EkranSkaneraState extends State<EkranSkanera> {
     for (var plik in pliki) {
       await _wyslijDoAI(File(plik.path));
 
-      // Po każdym wysłanym pliku zwiększamy licznik (chyba że to już ostatni)
       if (mounted && _aktualnyParagon < _wszystkieParagony) {
         setState(() {
           _aktualnyParagon++;
@@ -244,7 +212,6 @@ class _EkranSkaneraState extends State<EkranSkanera> {
       }
     }
 
-    // Koniec pętli = wyłączamy ładowanie
     if (mounted) {
       setState(() {
         _trwaLadowanie = false;
@@ -255,18 +222,10 @@ class _EkranSkaneraState extends State<EkranSkanera> {
     }
   }
 
-  // Wysyła jeden konkretny plik do FastAPI
   Future<void> _wyslijDoAI(File plikZdjecia) async {
     try {
-      // MAGIA 1: Wybieramy adres serwera na podstawie przełącznika!
-      String baseUrl =
-          "https://antoniklusek--ksiegowy-ai-v4-dual-fastapi-endpoint.modal.run";
-
-      String urlDocelowy = _wybranyModel == 'Qwen'
-          ? "$baseUrl/skanuj_qwen"
-          : "$baseUrl/skanuj_paligemma";
-
-      var request = http.MultipartRequest('POST', Uri.parse(urlDocelowy));
+      // Proste zapytanie na nasz jeden silnik
+      var request = http.MultipartRequest('POST', Uri.parse(apiEndpoint));
       request.files.add(
         await http.MultipartFile.fromPath('file', plikZdjecia.path),
       );
@@ -279,11 +238,11 @@ class _EkranSkaneraState extends State<EkranSkanera> {
         if (jsonResponse['status'] == 'success') {
           String trwalaSciezka = await zapiszZdjecieLokalnie(plikZdjecia);
 
-          // MAGIA 2: Zapisujemy do bazy nazwę modelu, który to przetworzył!
+          // Wpisujemy model na sztywno
           await _zapiszDoBazyDanych(
             jsonResponse['dane'],
             trwalaSciezka,
-            _wybranyModel,
+            'Multi-LoRA',
           );
         } else {
           _pokazKomunikat(
@@ -300,14 +259,11 @@ class _EkranSkaneraState extends State<EkranSkanera> {
     }
   }
 
-  // "Wiadro" na dane - zapis do bazy SQLite
-  // Dodaliśmy argumenty: sciezkaZdjecia i modelAi
   Future<void> _zapiszDoBazyDanych(
     Map<String, dynamic> dane,
     String? sciezkaZdjecia,
     String? modelAi,
   ) async {
-    // Zabezpieczenie na wypadek przecinka zamiast kropki
     double kwota =
         double.tryParse(
           dane['kwota_calkowita']?.toString().replaceAll(',', '.') ?? '0',
@@ -318,9 +274,8 @@ class _EkranSkaneraState extends State<EkranSkanera> {
       'sklep': dane['sklep'] ?? 'Nieznany sklep',
       'data': dane['data_czas'] ?? 'Brak daty',
       'kwota': kwota,
-      'image_local_path': sciezkaZdjecia, // <--- NOWE (Ścieżka do zdjęcia)
-      'ai_model_used':
-          modelAi, // <--- NOWE (Informacja, czy to Qwen, czy PaliGemma)
+      'image_local_path': sciezkaZdjecia,
+      'ai_model_used': modelAi,
     });
 
     if (dane['pozycje'] != null) {
@@ -339,7 +294,6 @@ class _EkranSkaneraState extends State<EkranSkanera> {
     }
   }
 
-  // Wyświetlanie powiadomień (SnackBar) na dole ekranu
   void _pokazKomunikat(String wiadomosc, {bool isError = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -353,130 +307,67 @@ class _EkranSkaneraState extends State<EkranSkanera> {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        // WARSTWA 1: Twój wyśrodkowany, główny interfejs (na samym spodzie)
-        Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.document_scanner, size: 100, color: kobalt),
-              const SizedBox(height: 20),
-              const Text(
-                'Księgowy AI czeka',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Zrób zdjęcie lub wybierz KILKA z galerii,\na sztuczna inteligencja zrobi resztę.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey),
-              ),
-              const SizedBox(height: 40),
+    // Usunięty zbędny Stack, czysty wyśrodkowany interfejs
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.document_scanner, size: 100, color: kobalt),
+          const SizedBox(height: 20),
+          const Text(
+            'Księgowy AI czeka',
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Zrób zdjęcie lub wybierz KILKA z galerii,\na sztuczna inteligencja zrobi resztę.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey),
+          ),
+          const SizedBox(height: 40),
 
-              // Zmieniony interfejs ładowania z licznikiem
-              _trwaLadowanie
-                  ? Column(
-                      children: [
-                        CircularProgressIndicator(color: kobalt),
-                        const SizedBox(height: 15),
-                        Text(
-                          _wszystkieParagony > 1
-                              ? "Przetwarzanie paragonu $_aktualnyParagon z $_wszystkieParagony..."
-                              : "AI analizuje paragon, proszę czekać...",
-                          style: const TextStyle(
-                            color: Colors.grey,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    )
-                  : ElevatedButton.icon(
-                      onPressed: _pokazMenuWyboru,
-                      icon: const Icon(Icons.add_a_photo, color: Colors.white),
-                      label: const Text(
-                        'Skanuj Paragony',
-                        style: TextStyle(color: Colors.white, fontSize: 18),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kobalt,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 30,
-                          vertical: 15,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                        ),
+          _trwaLadowanie
+              ? Column(
+                  children: [
+                    CircularProgressIndicator(color: kobalt),
+                    const SizedBox(height: 15),
+                    Text(
+                      _wszystkieParagony > 1
+                          ? "Przetwarzanie paragonu $_aktualnyParagon z $_wszystkieParagony..."
+                          : "AI analizuje paragon, proszę czekać...",
+                      style: const TextStyle(
+                        color: Colors.grey,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-            ],
-          ),
-        ),
-
-        // WARSTWA 2: Pływający przycisk w prawym górnym rogu
-        Positioned(
-          top: 16,
-          right: 16,
-          child: SafeArea(
-            // Chroni przed wejściem pod notch/baterię
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: kobalt.withOpacity(0.3)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+                  ],
+                )
+              : ElevatedButton.icon(
+                  onPressed: _pokazMenuWyboru,
+                  icon: const Icon(Icons.add_a_photo, color: Colors.white),
+                  label: const Text(
+                    'Skanuj Paragony',
+                    style: TextStyle(color: Colors.white, fontSize: 18),
                   ),
-                ],
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: _wybranyModel, // To Twoja zmienna z Krok 1
-                  icon: Icon(Icons.keyboard_arrow_down, color: kobalt),
-                  style: TextStyle(
-                    color: kobalt,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kobalt,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 30,
+                      vertical: 15,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30),
+                    ),
                   ),
-                  items: ['Qwen', 'PaliGemma'].map((String model) {
-                    return DropdownMenuItem<String>(
-                      value: model,
-                      child: Row(
-                        children: [
-                          Icon(
-                            model == 'Qwen' ? Icons.memory : Icons.bolt,
-                            size: 16,
-                            color: kobalt,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(model),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (String? nowyModel) {
-                    if (nowyModel != null) {
-                      setState(() {
-                        _wybranyModel = nowyModel;
-                      });
-                    }
-                  },
                 ),
-              ),
-            ),
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
 
 // ==========================================
-// ZAKŁADKA 2: PARAGONY (HISTORIA)
+// ZAKŁADKA 2: EKRAN PARAGONÓW
 // ==========================================
 class EkranParagonow extends StatefulWidget {
   const EkranParagonow({super.key});
@@ -502,6 +393,7 @@ class _EkranParagonowState extends State<EkranParagonow> {
 
   @override
   Widget build(BuildContext context) {
+    // Usunięty zbędny pasek filtrowania
     return FutureBuilder<List<Map<String, dynamic>>>(
       future: _paragony,
       builder: (context, snapshot) {
@@ -531,7 +423,7 @@ class _EkranParagonowState extends State<EkranParagonow> {
               margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
               child: ListTile(
                 leading: const CircleAvatar(
-                  backgroundColor: Color(0xFF0047AB), // Nasz kobalt
+                  backgroundColor: Color(0xFF0047AB),
                   child: Icon(Icons.receipt_long, color: Colors.white),
                 ),
                 title: Text(
@@ -541,7 +433,7 @@ class _EkranParagonowState extends State<EkranParagonow> {
                     fontSize: 16,
                   ),
                 ),
-                subtitle: Text(paragon['data'] ?? 'Brak daty'),
+                subtitle: Text('${paragon['data'] ?? 'Brak daty'}'),
                 trailing: Text(
                   '${paragon['kwota'].toStringAsFixed(2)} zł',
                   style: const TextStyle(
@@ -551,7 +443,6 @@ class _EkranParagonowState extends State<EkranParagonow> {
                   ),
                 ),
                 onTap: () async {
-                  // Otwiera nowy ekran. Czeka na powrót. Jeśli wrócisz, odświeża bazę.
                   await Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -582,7 +473,7 @@ class EkranBazy extends StatefulWidget {
 
 class _EkranBazyState extends State<EkranBazy> {
   late Future<List<Map<String, dynamic>>> _pozycje;
-  String _sortowanie = 'data_desc'; // Domyślne sortowanie
+  String _sortowanie = 'data_desc';
 
   @override
   void initState() {
@@ -593,10 +484,7 @@ class _EkranBazyState extends State<EkranBazy> {
   void _odswiezBaze() {
     setState(() {
       _pozycje = DatabaseHelper.instance.pobierzWszystkiePozycje().then((dane) {
-        // Tworzymy kopię listy, żeby móc ją bezpiecznie sortować
         var lista = List<Map<String, dynamic>>.from(dane);
-
-        // Magia sortowania
         if (_sortowanie == 'cena_desc') {
           lista.sort((a, b) => (b['cena'] as num).compareTo(a['cena'] as num));
         } else if (_sortowanie == 'cena_asc') {
@@ -608,7 +496,6 @@ class _EkranBazyState extends State<EkranBazy> {
             ),
           );
         } else {
-          // data_desc (Domyślnie najnowsze)
           lista.sort(
             (a, b) => (b['data'] ?? '').toString().compareTo(
               (a['data'] ?? '').toString(),
@@ -624,7 +511,6 @@ class _EkranBazyState extends State<EkranBazy> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Pasek narzędzi z opcją sortowania
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
           color: Colors.white,
@@ -664,7 +550,7 @@ class _EkranBazyState extends State<EkranBazy> {
                   if (nowaWartosc != null) {
                     setState(() {
                       _sortowanie = nowaWartosc;
-                      _odswiezBaze(); // Przeładuj listę po zmianie opcji
+                      _odswiezBaze();
                     });
                   }
                 },
@@ -672,8 +558,6 @@ class _EkranBazyState extends State<EkranBazy> {
             ],
           ),
         ),
-
-        // Lista produktów
         Expanded(
           child: FutureBuilder<List<Map<String, dynamic>>>(
             future: _pozycje,
@@ -709,6 +593,7 @@ class _EkranBazyState extends State<EkranBazy> {
                         p['nazwa'] ?? 'Nieznany produkt',
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
+                      // Usunięty dopisek o modelu
                       subtitle: Text('${p['sklep']} • ${p['data']}'),
                       trailing: Text(
                         '${p['cena'].toStringAsFixed(2)} zł',
@@ -718,6 +603,23 @@ class _EkranBazyState extends State<EkranBazy> {
                           fontSize: 16,
                         ),
                       ),
+                      onTap: () async {
+                        final paragonId = p['paragon_id'];
+                        final pelnyParagon = await DatabaseHelper.instance
+                            .pobierzPojedynczyParagon(paragonId);
+
+                        if (pelnyParagon != null && context.mounted) {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => EkranSzczegolowParagonu(
+                                paragon: pelnyParagon,
+                              ),
+                            ),
+                          );
+                          _odswiezBaze();
+                        }
+                      },
                     ),
                   );
                 },
@@ -739,7 +641,6 @@ class EkranStatystyk extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder(
-      // Pobieramy obie tabele naraz!
       future: Future.wait([
         DatabaseHelper.instance.pobierzWszystkieParagony(),
         DatabaseHelper.instance.pobierzWszystkiePozycje(),
@@ -761,15 +662,11 @@ class EkranStatystyk extends StatelessWidget {
         final paragony = snapshot.data![0] as List<Map<String, dynamic>>;
         final pozycje = snapshot.data![1] as List<Map<String, dynamic>>;
 
-        // --- MATEMATYKA W LOCIE ---
-
-        // 1. Łączna suma wydatków
         double sumaCalkowita = paragony.fold(
           0,
           (sum, p) => sum + (p['kwota'] as num),
         );
 
-        // 2. Najdroższy produkt
         Map<String, dynamic>? najdrozszyProdukt;
         if (pozycje.isNotEmpty) {
           najdrozszyProdukt = pozycje.reduce(
@@ -777,7 +674,6 @@ class EkranStatystyk extends StatelessWidget {
           );
         }
 
-        // 3. Najczęstszy produkt
         Map<String, int> czestotliwosc = {};
         for (var p in pozycje) {
           String nazwa = p['nazwa'] ?? 'Nieznany';
@@ -791,7 +687,6 @@ class EkranStatystyk extends StatelessWidget {
               "${sortedKeys.first} (${czestotliwosc[sortedKeys.first]}x)";
         }
 
-        // 4. Top 5 sklepów (grupowanie po kwocie)
         Map<String, double> sklepyWydatki = {};
         for (var p in paragony) {
           String sklep = p['sklep'] ?? 'Inne';
@@ -802,11 +697,9 @@ class EkranStatystyk extends StatelessWidget {
           ..sort((a, b) => b.value.compareTo(a.value));
         var topSklepy = posortowaneSklepy.take(5).toList();
 
-        // --- INTERFEJS KART ---
         return ListView(
           padding: const EdgeInsets.all(12),
           children: [
-            // KARTA: Łączne wydatki
             Card(
               color: const Color(0xFF0047AB),
               elevation: 4,
@@ -833,7 +726,6 @@ class EkranStatystyk extends StatelessWidget {
             ),
             const SizedBox(height: 10),
 
-            // KARTA: Ciekawostki
             Card(
               elevation: 2,
               child: Padding(
@@ -877,7 +769,6 @@ class EkranStatystyk extends StatelessWidget {
             ),
             const SizedBox(height: 10),
 
-            // KARTA: Top Sklepy
             Card(
               elevation: 2,
               child: Padding(
@@ -925,7 +816,7 @@ class EkranStatystyk extends StatelessWidget {
 }
 
 // ==========================================
-// EKRAN SZCZEGÓŁÓW PARAGONU (EDYCJA I USUWANIE)
+// EKRAN SZCZEGÓŁÓW PARAGONU
 // ==========================================
 class EkranSzczegolowParagonu extends StatefulWidget {
   final Map<String, dynamic> paragon;
@@ -953,7 +844,6 @@ class _EkranSzczegolowParagonuState extends State<EkranSzczegolowParagonu> {
     });
   }
 
-  // Okienko do edycji produktu
   void _edytujPozycje(Map<String, dynamic> pozycja) {
     TextEditingController nazwaCtrl = TextEditingController(
       text: pozycja['nazwa'],
@@ -998,7 +888,6 @@ class _EkranSzczegolowParagonuState extends State<EkranSzczegolowParagonu> {
                 cenaCtrl.text.replaceAll(',', '.'),
               );
               if (nowaCena != null && nazwaCtrl.text.isNotEmpty) {
-                // Aktualizujemy w bazie produkt i przeliczamy paragon!
                 await DatabaseHelper.instance.aktualizujPozycje(
                   pozycja['id'],
                   nazwaCtrl.text,
@@ -1008,7 +897,7 @@ class _EkranSzczegolowParagonuState extends State<EkranSzczegolowParagonu> {
                   widget.paragon['id'],
                 );
                 if (context.mounted) Navigator.pop(context);
-                _odswiezPozycje(); // Odśwież widok
+                _odswiezPozycje();
               }
             },
             child: const Text('Zapisz'),
@@ -1018,11 +907,9 @@ class _EkranSzczegolowParagonuState extends State<EkranSzczegolowParagonu> {
     );
   }
 
-  // Usuwanie paragonu
   void _usunCalyParagon() async {
     await DatabaseHelper.instance.usunParagon(widget.paragon['id']);
-    if (context.mounted)
-      Navigator.pop(context, true); // true = sygnał do odświeżenia listy
+    if (context.mounted) Navigator.pop(context, true);
   }
 
   @override
@@ -1039,7 +926,6 @@ class _EkranSzczegolowParagonuState extends State<EkranSzczegolowParagonu> {
           IconButton(
             icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
             onPressed: () {
-              // Potwierdzenie przed usunięciem
               showDialog(
                 context: context,
                 builder: (context) => AlertDialog(
@@ -1078,14 +964,11 @@ class _EkranSzczegolowParagonuState extends State<EkranSzczegolowParagonu> {
           final pozycje = snapshot.data!;
 
           return ListView.builder(
-            // DODAJEMY +1 DO DŁUGOŚCI LISTY NA NASZ PANEL ZE ZDJĘCIEM
             itemCount: pozycje.length + 1,
             itemBuilder: (context, index) {
-              // --- NOWOŚĆ: STOPKA LISTY (JEŚLI TO OSTATNI ELEMENT) ---
               if (index == pozycje.length) {
-                // Wyciągamy dane prosto z obiektu widget.paragon
                 String? sciezkaZdjecia = widget.paragon['image_local_path'];
-                String? uzytyModel = widget.paragon['ai_model_used'];
+                // Zniknęła stąd sekcja wyświetlająca użytą nazwę modelu
 
                 return Padding(
                   padding: const EdgeInsets.all(16.0),
@@ -1095,34 +978,6 @@ class _EkranSzczegolowParagonuState extends State<EkranSzczegolowParagonu> {
                       const SizedBox(height: 20),
                       const Divider(thickness: 2),
 
-                      // Nazwa użytego modelu
-                      if (uzytyModel != null && uzytyModel.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8.0),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                uzytyModel == 'Qwen'
-                                    ? Icons.memory
-                                    : Icons.bolt,
-                                size: 16,
-                                color: Colors.grey[600],
-                              ),
-                              const SizedBox(width: 5),
-                              Text(
-                                'Zeskanowano przez: $uzytyModel',
-                                style: TextStyle(
-                                  color: Colors.grey[600],
-                                  fontStyle: FontStyle.italic,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                      // Sekcja ze zdjęciem
                       if (sciezkaZdjecia != null &&
                           sciezkaZdjecia.isNotEmpty &&
                           File(sciezkaZdjecia).existsSync()) ...[
@@ -1163,9 +1018,7 @@ class _EkranSzczegolowParagonuState extends State<EkranSzczegolowParagonu> {
                   ),
                 );
               }
-              // --- KONIEC NOWOŚCI ---
 
-              // --- TWÓJ ORYGINALNY KOD DLA POZYCJI (Bez zmian) ---
               final pozycja = pozycje[index];
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

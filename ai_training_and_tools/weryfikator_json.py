@@ -7,15 +7,15 @@ from PIL import Image, ImageTk
 # ==========================================
 # ⚙️ KONFIGURACJA
 # ==========================================
-PLIK_WEJSCIOWY = "dataset_niedokładny.jsonl"
-PLIK_WYJSCIOWY = "dataset_finalny.jsonl"
+PLIK_WEJSCIOWY = "dataset_ocr_niedokladny.jsonl"
+PLIK_WYJSCIOWY = "dataset_ocr_finalny.jsonl"
 
 
 class WeryfikatorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Księgowy AI - Weryfikator Datasetu")
-        self.root.geometry("1400x900")
+        self.root.title("Księgowy AI - Weryfikator Datasetu (ZAAWANSOWANY ZOOM)")
+        self.root.geometry("1400x900")  # Lekko wyższe okno
 
         self.dataset = []
         self.aktualny_indeks = 0
