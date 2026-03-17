@@ -29,15 +29,15 @@ class DatabaseHelper {
     const realType = 'REAL NOT NULL';
     const intType = 'INTEGER NOT NULL';
 
-    // Tabela Paragonów
+    // Tabela Paragonów (zostawiamy ai_model_used, żeby nie robić skomplikowanych migracji bazy)
     await db.execute('''
       CREATE TABLE paragony(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sklep TEXT,
         data TEXT,
         kwota REAL,
-        image_local_path TEXT,  -- NOWA KOLUMNA NA ZDJĘCIE
-        ai_model_used TEXT      -- NOWA KOLUMNA NA NAZWĘ MODELU
+        image_local_path TEXT,
+        ai_model_used TEXT
       )
     ''');
 
@@ -54,7 +54,7 @@ class DatabaseHelper {
   }
 
   // ==========================================
-  // METODY DO ZAPISYWANIA DANYCH Z QWENA
+  // METODY DO ZAPISYWANIA DANYCH Z AI
   // ==========================================
 
   // 1. Zapisuje paragon i zwraca jego wygenerowane ID
@@ -73,10 +73,20 @@ class DatabaseHelper {
   // METODY DO ODCZYTU (Na potrzeby zakładek)
   // ==========================================
 
-  // Pobiera wszystkie paragony do Zakładki "Paragony"
+  // POBIERANIE WSZYSTKICH PARAGONÓW (Usunięto filtrowanie po AI)
   Future<List<Map<String, dynamic>>> pobierzWszystkieParagony() async {
     final db = await instance.database;
     return await db.query('paragony', orderBy: 'data DESC');
+  }
+
+  // Pobiera jeden konkretny paragon po jego ID (Do Deep Linkingu)
+  Future<Map<String, dynamic>?> pobierzPojedynczyParagon(int id) async {
+    final db = await instance.database;
+    var result = await db.query('paragony', where: 'id = ?', whereArgs: [id]);
+    if (result.isNotEmpty) {
+      return result.first;
+    }
+    return null;
   }
 
   // Pobiera wszystkie pozycje do Zakładki "Baza/Analityka"
@@ -84,12 +94,13 @@ class DatabaseHelper {
     final db = await instance.database;
     // Łączymy tabele, żeby przy produkcie wiedzieć, z jakiego jest sklepu i z jaką datą
     return await db.rawQuery('''
-      SELECT pozycje.*, paragony.sklep, paragony.data 
+      SELECT pozycje.*, paragony.sklep, paragony.data, paragony.ai_model_used 
       FROM pozycje 
       JOIN paragony ON pozycje.paragon_id = paragony.id
       ORDER BY paragony.data DESC
     ''');
   }
+
   // ==========================================
   // ZARZĄDZANIE PARAGONAMI (ZAKŁADKA 2)
   // ==========================================
