@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
@@ -5,6 +6,13 @@ class DatabaseHelper {
   // Wzorzec Singleton - gwarantuje, że mamy tylko jedną instancję bazy w całej apce
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
+
+  final _dbChangeController = StreamController<void>.broadcast();
+  Stream<void> get onDatabaseChanged => _dbChangeController.stream;
+
+  void notifyDBChanged() {
+    _dbChangeController.add(null);
+  }
 
   DatabaseHelper._init();
 
@@ -73,10 +81,22 @@ class DatabaseHelper {
   // METODY DO ODCZYTU (Na potrzeby zakładek)
   // ==========================================
 
-  // POBIERANIE WSZYSTKICH PARAGONÓW (Usunięto filtrowanie po AI)
-  Future<List<Map<String, dynamic>>> pobierzWszystkieParagony() async {
+  Future<int> policzParagony() async {
     final db = await instance.database;
-    return await db.query('paragony', orderBy: 'data DESC');
+    final row = await db.rawQuery('SELECT COUNT(*) as count FROM paragony');
+    return Sqflite.firstIntValue(row) ?? 0;
+  }
+
+  Future<int> policzPozycje() async {
+    final db = await instance.database;
+    final row = await db.rawQuery('SELECT COUNT(*) as count FROM pozycje');
+    return Sqflite.firstIntValue(row) ?? 0;
+  }
+
+  // POBIERANIE WSZYSTKICH PARAGONÓW (Z paginacją)
+  Future<List<Map<String, dynamic>>> pobierzWszystkieParagony({int limit = 100, int offset = 0}) async {
+    final db = await instance.database;
+    return await db.query('paragony', orderBy: 'data DESC', limit: limit, offset: offset);
   }
 
   // Pobiera jeden konkretny paragon po jego ID (Do Deep Linkingu)
@@ -89,8 +109,8 @@ class DatabaseHelper {
     return null;
   }
 
-  // Pobiera wszystkie pozycje do Zakładki "Baza/Analityka"
-  Future<List<Map<String, dynamic>>> pobierzWszystkiePozycje() async {
+  // Pobiera wszystkie pozycje do Zakładki "Baza/Analityka" (Z paginacją)
+  Future<List<Map<String, dynamic>>> pobierzWszystkiePozycje({int limit = 100, int offset = 0}) async {
     final db = await instance.database;
     // Łączymy tabele, żeby przy produkcie wiedzieć, z jakiego jest sklepu i z jaką datą
     return await db.rawQuery('''
@@ -98,7 +118,8 @@ class DatabaseHelper {
       FROM pozycje 
       JOIN paragony ON pozycje.paragon_id = paragony.id
       ORDER BY paragony.data DESC
-    ''');
+      LIMIT ? OFFSET ?
+    ''', [limit, offset]);
   }
 
   // ==========================================
@@ -140,6 +161,16 @@ class DatabaseHelper {
     );
   }
 
+  // 3a. Usuwanie pojedynczej pozycji z paragonu
+  Future<void> usunPozycje(int pozycjaId) async {
+    final db = await instance.database;
+    await db.delete(
+      'pozycje',
+      where: 'id = ?',
+      whereArgs: [pozycjaId],
+    );
+  }
+
   // 4. Przeliczanie łącznej sumy paragonu (gdy zmienisz cenę produktu)
   Future<void> przeliczSumeParagonu(int paragonId) async {
     final db = await instance.database;
@@ -155,5 +186,6 @@ class DatabaseHelper {
       where: 'id = ?',
       whereArgs: [paragonId],
     );
+    notifyDBChanged();
   }
 }

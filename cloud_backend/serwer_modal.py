@@ -1,5 +1,6 @@
 import modal
 from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import StreamingResponse
 import io
 import json
 import re
@@ -31,7 +32,6 @@ image = (
 # 2. DYSKI (VOLUMES)
 # ==========================================
 wolumen_paragonow = modal.Volume.from_name("archiwum-paragonow", create_if_missing=True)
-# Tworzymy jeden dysk, na który wrzucisz oba foldery z wagami LoRA
 wolumen_modele = modal.Volume.from_name("modele-lora-wolumen", create_if_missing=True)
 
 app = modal.App("ksiegowy-ai-v5-multi-lora")
@@ -47,9 +47,9 @@ def wyciagnij_json(tekst):
 
 
 # ==========================================
-# 🧠 SILNIK: QWEN 2 VL (DUAL-LORA)
+# 🧠 SILNIK: QWEN 2 VL (DUAL-LORA + STREAMING)
 # ==========================================
-@app.cls(image=image, gpu="A10G", volumes={"/zapisane_paragony": wolumen_paragonow, "/modele_lora": wolumen_modele})
+@app.cls(image=image, gpu="A10G", volumes={"/zapisane_paragony": wolumen_paragonow, "/modele-lora": wolumen_modele})
 class MultiLoraOCR:
     @modal.enter()
     def start_maszyny(self):
@@ -67,14 +67,12 @@ class MultiLoraOCR:
             device_map="cuda"
         )
 
-        # ⚠️ WAŻNE: Upewnij się, że wgrałeś te foldery na wolumen "modele-lora-wolumen" w Modalu!
         print("🧩 Wpinanie modułu OCR (LoRA 1)...")
-        self.model = PeftModel.from_pretrained(base_model, "/modele_lora/qwen_ocr_lora_v2", adapter_name="ocr")
+        self.model = PeftModel.from_pretrained(base_model, "/modele-lora/qwen_ocr_lora_v2", adapter_name="ocr")
 
         print("🧩 Wpinanie modułu Kategoryzacji (LoRA 2)...")
-        self.model.load_adapter("/modele_lora/qwen_kategorie_lora", adapter_name="kategorie")
+        self.model.load_adapter("/modele-lora/qwen_kategorie_lora_v2", adapter_name="kategorie")
 
-        # Nasze żelazne prompty
         self.PROMPT_OCR = """Jesteś precyzyjnym systemem OCR. Twoim zadaniem jest odczytanie paragonu ze zdjęcia.
 ZACHOWAJ oryginalną pisownię, wszystkie skróty, dziwne znaki, wielkość liter i gramatury dokładnie tak, jak widać na zdjęciu. 
 ABSOLUTNIE NIE poprawiaj nazw produktów i nie usuwaj żadnych słów.
@@ -84,7 +82,8 @@ Zwróć wynik TYLKO jako czysty format JSON."""
 Zwróć TYLKO czystą, znormalizowaną nazwę lub kategorię, bez żadnych dodatkowych słów, znaków zapytania czy wyjaśnień."""
 
     @modal.method()
-    def przetworz_zdjecie(self, image_bytes: bytes, filename: str):
+    def przetworz_zdjecie_stream(self, image_bytes: bytes, filename: str):
+        """Zmieniono na generator wysyłający pingi (yield) w czasie rzeczywistym"""
         import torch
         from PIL import Image
         from qwen_vl_utils import process_vision_info
@@ -92,28 +91,24 @@ Zwróć TYLKO czystą, znormalizowaną nazwę lub kategorię, bez żadnych dodat
         import os
         import time
 
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        # --- PING 1: Serwer gotowy ---
+        yield f"data: {json.dumps({'status': 'info', 'wiadomosc': 'Wybudzanie maszyny A10G...'})}\n\n"
 
-        # ---------------------------------------------------------
-        # ZAPIS ZDJĘCIA NA CHMUROWY DYSK
-        # ---------------------------------------------------------
-        # Generujemy unikalną nazwę (znacznik czasu + nazwa), żeby pliki się nie nadpisywały
+        # OPTYMALIZACJA WIZYJNA: Skalowanie obrazu w dół przed podaniem do Qwena
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        img.thumbnail((1024, 1024))  # Obcina max rozdzielczość, zachowuje proporcje
+
+        # Zapis na dysk
         bezpieczna_nazwa = f"{int(time.time())}_{filename}"
         sciezka_docelowa = os.path.join("/zapisane_paragony", bezpieczna_nazwa)
-
-        # Zapisujemy plik fizycznie na wolumenie
         with open(sciezka_docelowa, "wb") as f:
             f.write(image_bytes)
-
-        # WAŻNE W CHMURZE: Jawnie zapisujemy zmiany na dysku Modala
         wolumen_paragonow.commit()
-        print(f"💾 Zapisano kopię w chmurze: {bezpieczna_nazwa}")
 
-        # ---------------------------------------------------------
-        # ETAP 1: ODCZYT ZDJĘCIA (OCR)
-        # ---------------------------------------------------------
+        # --- PING 2: OCR ---
+        yield f"data: {json.dumps({'status': 'info', 'wiadomosc': 'Sztuczna inteligencja czyta dokument (OCR)...'})}\n\n"
+
         self.model.set_adapter("ocr")
-
         messages_ocr = [
             {"role": "user", "content": [
                 {"type": "image", "image": img},
@@ -126,7 +121,7 @@ Zwróć TYLKO czystą, znormalizowaną nazwę lub kategorię, bez żadnych dodat
 
         inputs_ocr = self.processor(
             text=[text_ocr], images=image_inputs, videos=video_inputs, padding=True, return_tensors="pt",
-            max_pixels=1024*1024
+            max_pixels=1024 * 1024
         ).to("cuda")
 
         with torch.inference_mode():
@@ -134,24 +129,22 @@ Zwróć TYLKO czystą, znormalizowaną nazwę lub kategorię, bez żadnych dodat
 
         generated_ids_trimmed = [out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs_ocr.input_ids, generated_ids)]
         output_ocr = self.processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True)[0]
-
         czysty_json = wyciagnij_json(output_ocr)
 
         try:
             dane_paragonu = json.loads(czysty_json)
         except json.JSONDecodeError:
-            return {"status": "error", "message": "Błąd parsowania JSON z OCR", "raw_output": output_ocr}
+            yield f"data: {json.dumps({'status': 'error', 'message': 'Błąd parsowania JSON', 'raw': output_ocr})}\n\n"
+            return
 
-        # ---------------------------------------------------------
-        # ETAP 2: NORMALIZACJA TEKSTU I NADPISYWANIE
-        # ---------------------------------------------------------
+        # --- PING 3: Kategoryzacja ---
+        yield f"data: {json.dumps({'status': 'info', 'wiadomosc': 'Kategoryzacja i mapowanie wydatków...'})}\n\n"
+
         self.model.set_adapter("kategorie")
-
         if "pozycje" in dane_paragonu:
             for pozycja in dane_paragonu["pozycje"]:
                 if "nazwa" in pozycja:
                     surowa_nazwa = pozycja["nazwa"]
-
                     messages_kat = [
                         {"role": "system", "content": self.PROMPT_KAT},
                         {"role": "user", "content": f'Wejście: "{surowa_nazwa}" -> Wyjście:'}
@@ -167,17 +160,14 @@ Zwróć TYLKO czystą, znormalizowaną nazwę lub kategorię, bez żadnych dodat
                                        zip(inputs_kat.input_ids, gen_kat_ids)]
                     czysta_nazwa = self.processor.batch_decode(gen_kat_trimmed, skip_special_tokens=True)[0].strip()
                     czysta_nazwa = czysta_nazwa.replace('"', '').strip()
-
-                    # Nadpisanie
                     pozycja["nazwa"] = czysta_nazwa
 
-        return {"status": "success", "dane": dane_paragonu}
-
-
+        # --- PING 4: Finał ---
+        yield f"data: {json.dumps({'status': 'sukces', 'wynik': dane_paragonu})}\n\n"
 
 
 # ==========================================
-# 🌐 FASTAPI ENDPOINT
+# 🌐 FASTAPI ENDPOINT (SSE STREAMING)
 # ==========================================
 @app.function(image=image)
 @modal.asgi_app()
@@ -187,7 +177,11 @@ def fastapi_endpoint():
         image_bytes = await file.read()
         model_instance = MultiLoraOCR()
 
-        # ZMIANA: Używamy .aio() dla poprawnego działania asynchronicznego!
-        return await model_instance.przetworz_zdjecie.remote.aio(image_bytes, file.filename)
+        async def strumien():
+            # remote_gen.aio pozwala na asynchroniczne odczytywanie yieldów z klasy Modala
+            async for chunk in model_instance.przetworz_zdjecie_stream.remote_gen.aio(image_bytes, file.filename):
+                yield chunk
+
+        return StreamingResponse(strumien(), media_type="text/event-stream")
 
     return web_app
